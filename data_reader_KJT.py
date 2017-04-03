@@ -9,7 +9,7 @@ import matplotlib.image as mpimg
 
 class DataReader(object):
 
-    def __init__(self, input_dir, output_dir, norm_dir, w=19, u=9, name=None, valid=False):
+    def __init__(self, input_dir, output_dir, norm_dir, num_steps=10, name=None, valid=False):
         print(name.title() + " data reader initialization...")
         self._input_dir = input_dir
         self._output_dir = output_dir
@@ -25,8 +25,7 @@ class DataReader(object):
         self._start_idx = 0
         self._inputs = self._read_input(self._input_file_list[self._num_file], self._input_spec_list[self._num_file])
         self._outputs = self._read_output(self._output_file_list[self._num_file])
-        self._w = w
-        self._u = u
+        self._num_steps = num_steps
         self.eof = False
         self._num_figure = 1
         assert np.shape(self._inputs)[0] == np.shape(self._outputs)[0], \
@@ -45,22 +44,32 @@ class DataReader(object):
     def _binary_read_with_shape(self):
         pass
 
-    @staticmethod
-    def _read_input(input_file_dir, input_spec_dir):
+    def _read_input(self, input_file_dir, input_spec_dir):
 
         data = np.fromfile(input_file_dir, dtype=np.float32)  # (# total frame, feature_size)
         with open(input_spec_dir,'r') as f:
             spec = f.readline()
             size = spec.split(',')
         data = data.reshape((int(size[0]), int(size[1])), order='F')
+        data_len = data.shape[0] - (data.shape[0] % self._num_steps)
+        data = data[0:data_len, :]
+        data = self.normalize(data)
+
+        fft_size = data.shape[1]
+        channel_size = 1
+
+        data = data.reshape((-1, self._num_steps, fft_size, channel_size))  # verification
 
         return data
 
-    @staticmethod
-    def _read_output(output_file_dir):
+    def _read_output(self, output_file_dir):
 
         data = np.fromfile(output_file_dir, dtype=np.float32)  # data shape : (# total frame,)
         data = data.reshape(-1, 1)  # data shape : (# total frame, 1)
+        data_len = data.shape[0] - (data.shape[0] % self._num_steps)
+        data = data[0:data_len, :]
+
+        data = data.reshape(-1, self._num_steps, 1)
 
         return data
 
@@ -94,12 +103,13 @@ class DataReader(object):
             # print("current file number : %d, samples : %d" % (self._num_file + 1, self.num_samples))
             #print("Loaded " + self._name + " file number : %d" % (self._num_file + 1))
 
-        inputs = self._inputs[self._start_idx:self._start_idx + batch_size, :]
-        inputs = self.normalize(inputs)
-        inputs = utils.bdnn_transform(inputs, self._w, self._u)
-        inputs = inputs[self._w: (batch_size-self._w), :]
+        inputs = self._inputs
+        outputs = self._outputs
 
-        outputs = self._outputs[self._start_idx:self._start_idx + batch_size, :]
+        '''data mini batching part'''
+
+        inputs = inputs[self._start_idx:self._start_idx + batch_size, :]
+        outputs = outputs[self._start_idx:self._start_idx + batch_size, :]
 
         # if valid:
         #     plt.figure(self._num_figure)
@@ -110,8 +120,6 @@ class DataReader(object):
         #     cc = aa + bb
         #     imgplot = plt.imshow(cc.T)
         #     plt.show()
-
-        outputs = outputs[self._w: (batch_size - self._w), :]
 
         self._start_idx += batch_size
         # print(self._start_idx)
